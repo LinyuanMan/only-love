@@ -170,6 +170,24 @@
     opacity: 0.65;
     letter-spacing: 1px;
   }
+  .heart-count {
+    margin-top: 14px;
+    font-size: 14px;
+    letter-spacing: 1px;
+    color: #ffe6ee;
+    opacity: 0.9;
+  }
+  .heart-count .num {
+    font-weight: 700;
+    color: #ffd700;
+    display: inline-block;
+  }
+  .heart-count .num.pop { animation: countPop 0.35s ease; }
+  @keyframes countPop {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.45); }
+    100% { transform: scale(1); }
+  }
   @media (max-width: 480px) {
     .card { padding: 28px 16px; }
     .title { font-size: 26px; }
@@ -210,6 +228,7 @@
 
     <div class="words" id="blessing">✨</div>
     <button class="heart-btn" id="heartBtn">💗 点我喷小心心</button>
+    <div class="heart-count" id="heartCount">💗 已送出 <span class="num" id="heartTotal">0</span> 颗小心心</div>
     <div class="footer">Forever &amp; Always</div>
   </div>
 
@@ -314,11 +333,72 @@
     }
   }
 
+  // 云端共享累计计数：所有设备共享同一个总数（刷新不重置）
+  // 数据源：kvdb.io 免费键值存储，原子自增，多设备同时点也不会丢计数
+  const HEART_COUNT_KEY = "heartTotalClicks";          // 本地缓存键
+  const HEART_BUCKET = "M6zRPY82ciWCqfrQwN9rU2";       // kvdb.io 数据桶 ID
+  const HEART_SERVER_KEY = "heartTotal";               // 云端计数键名
+  const heartTotalUrl = "https://kvdb.io/" + HEART_BUCKET + "/" + HEART_SERVER_KEY;
+
+  let heartTotal = 0;
+  // 先显示本地缓存，避免页面加载时闪 0
+  try {
+    const cached = parseInt(localStorage.getItem(HEART_COUNT_KEY) || "0", 10);
+    if (!isNaN(cached) && cached > 0) heartTotal = cached;
+  } catch (e) {}
+  const heartTotalEl = document.getElementById("heartTotal");
+  heartTotalEl.textContent = heartTotal;
+
+  function saveCache(n) {
+    try { localStorage.setItem(HEART_COUNT_KEY, String(n)); } catch (e) {}
+  }
+
+  // 从云端拉取最新总数并同步显示
+  function syncFromServer() {
+    fetch(heartTotalUrl)
+      .then(function (res) { return res.text(); })
+      .then(function (txt) {
+        const n = parseInt(txt, 10);
+        if (!isNaN(n) && n >= 0) {
+          heartTotal = n;
+          heartTotalEl.textContent = n;
+          saveCache(n);
+        }
+      })
+      .catch(function () { /* 网络不可用时保留本地缓存 */ });
+  }
+
+  // 点击：本地先 +1，同时云端原子自增，以云端返回的总数为准
+  function bumpHeartTotal() {
+    heartTotal += 1;
+    heartTotalEl.textContent = heartTotal;
+    saveCache(heartTotal);
+    heartTotalEl.classList.remove("pop");
+    void heartTotalEl.offsetWidth;
+    heartTotalEl.classList.add("pop");
+
+    fetch(heartTotalUrl, { method: "PATCH", body: "+1" })
+      .then(function (res) { return res.text(); })
+      .then(function (txt) {
+        const n = parseInt(txt, 10);
+        if (!isNaN(n) && n >= 0) {
+          heartTotal = n;
+          heartTotalEl.textContent = n;
+          saveCache(n);
+        }
+      })
+      .catch(function () { /* 离线时保留本地计数，联网后自动同步 */ });
+  }
+
+  // 页面加载后与云端同步一次
+  syncFromServer();
+
   heartBtn.addEventListener("click", function () {
     const rect = heartBtn.getBoundingClientRect();
     const sx = rect.left + rect.width / 2;
     const sy = rect.top + rect.height / 2;
     burstHearts(sx, sy, 26);
+    bumpHeartTotal();
   });
 
   // 背景漂浮爱心
